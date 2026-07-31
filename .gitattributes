@@ -1,0 +1,5 @@
+# Keep composer dist archives lean
+/.gitattributes export-ignore
+/.gitignore export-ignore
+/doc export-ignore
+/tests export-ignore
