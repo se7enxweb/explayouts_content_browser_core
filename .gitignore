@@ -1,0 +1,10 @@
+var/
+*.log
+.DS_Store
+*~
+*.bak
+*.offer
+*.notrequired-testing*
+\#*\#
+data/data.sql.backup*
+data/data.sql.full_before

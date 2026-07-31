@@ -1,0 +1,19 @@
+{
+    "name": "se7enxweb/explayouts-content-browser-core",
+    "description": "Content browser core backend services for Exponential Layouts on Exponential Legacy / Exponential 6.",
+    "type": "ezpublish-legacy-extension",
+    "homepage": "https://se7enx.com",
+    "license": "GNU General Public License v2.0 (or any later version)",
+    "require": {
+        "php": "^8.1 || ^8.2 || ^8.3 || ^8.4"
+    },
+    "extra": {
+        "ezpublish-legacy-extension-name": "explayouts_content_browser_core"
+    },
+    "authors": [
+        {
+            "name": "7x",
+            "homepage": "https://se7enx.com"
+        }
+    ]
+}
