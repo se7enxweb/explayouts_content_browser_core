@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <extension xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" requires="ezpublish 6.0">
-  <name>explayouts_content_browser_core</name>
+  <name>Exponential Layouts Content Browser Core</name>
   <summary>Content browser core backend services for Exponential Layouts on Exponential Legacy / Exponential 6</summary>
   <version>1.0.1</version>
   <copyright>7x</copyright>
