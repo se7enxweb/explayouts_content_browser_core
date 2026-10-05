@@ -5,7 +5,7 @@
     "homepage": "https://se7enx.com",
     "license": "GPL-2.0-or-later",
     "require": {
-        "php": "^8.1 || ^8.2 || ^8.3 || ^8.4"
+        "php": "^8.0 || ^8.1 || ^8.2 || ^8.3 || ^8.4"
     },
     "extra": {
         "ezpublish-legacy-extension-name": "explayouts_content_browser_core"

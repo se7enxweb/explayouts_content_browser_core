@@ -14,7 +14,7 @@ class explayouts_content_browser_coreInfo
     public static function info()
     {
         return array( 'Name' => "Exponential Layouts Content Browser Core",
-                      'Version' => "1.0.2",
+                      'Version' => "1.0.3",
                       'Copyright' => "Copyright (C) 1998 - 2026 7x. All rights reserved.",
                       'License' => "GNU General Public License v2.0 (or any later version)",
                       'info_url' => "https://github.com/se7enxweb/explayouts_content_browser_core" );
