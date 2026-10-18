@@ -11,6 +11,8 @@
  *  CB-02 - every word must be in the name or name a class (identifier or name, ignoring case)
  *  CB-03 - loadItem() hands out only nodes the current user may read
  *  CB-04 - the SQL of the filter: LIKE with the wildcards of the search escaped, the class ids as integers
+ *  CB-05 - without the settings of the filter (the kernel would ignore it and fetch everything) the words filter the
+ *          name alone, with *, \ and _ escaped
  */
 
 $failures = 0;
@@ -79,6 +81,12 @@ class eZContentClass
                       new self( array( 'id' => 7, 'identifier' => 'ng_landing_page', 'name' => 'Landing page' ) ) );
     }
 }
+class eZINI
+{
+    public static $groups = array( 'explayouts_content_browser_search' );
+    public static function instance( $name = 'site.ini' ) { return new self(); }
+    public function hasGroup( $group ) { return in_array( $group, self::$groups, true ); }
+}
 class eZDB
 {
     public static function instance() { return new self(); }
@@ -127,6 +135,15 @@ cbCheck( $sql['joins'] === "( ezcontentobject_name.name LIKE '%50!%!_o\\'k!!%' E
 eZContentObjectTreeNode::$readable = array( 2 );
 cbCheck( $backend->loadItem( 2 ) instanceof expLayoutsContentBrowserItem, 'CB-03 a readable node is loaded' );
 cbCheck( $backend->loadItem( 3 ) === false, 'CB-03 a node the user may not read is not' );
+
+// CB-05
+eZINI::$groups = array();
+$backend = new expLayoutsContentBrowserCoreBackend();
+$backend->searchItems( 'a_b* c\\d', 1 );
+$params = eZContentObjectTreeNode::$lastParams;
+cbCheck( !isset( $params['ExtendedAttributeFilter'] ) && isset( $params['AttributeFilter'] )
+         && $params['AttributeFilter'] === array( 'and', array( 'name', 'like', '*a\\_b\\**' ), array( 'name', 'like', '*c\\\\d*' ) ),
+         'CB-05 without its settings a name filter, never the whole tree: ' . json_encode( isset( $params['AttributeFilter'] ) ? $params['AttributeFilter'] : null ) );
 
 echo $failures ? "$failures failed\n" : "all passed\n";
 exit( $failures ? 1 : 0 );

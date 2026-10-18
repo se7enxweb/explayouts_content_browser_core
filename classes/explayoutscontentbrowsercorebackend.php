@@ -104,10 +104,35 @@ class expLayoutsContentBrowserCoreBackend
             if ( $term !== '' )
                 $words[] = array( 'term' => $term, 'class_ids' => $this->classIdsMatching( $term ) );
         }
-        if ( $words )
-            $params['ExtendedAttributeFilter'] = array( 'id' => 'explayouts_content_browser_search', 'params' => $words );
+        if ( !$words )
+            return $params;
 
+        // The kernel ignores an extended attribute filter it has no settings for and fetches everything, so the
+        // filter is only used when its settings are there; otherwise the words filter the name alone.
+        if ( self::searchFilterAvailable() )
+        {
+            $params['ExtendedAttributeFilter'] = array( 'id' => 'explayouts_content_browser_search', 'params' => $words );
+            return $params;
+        }
+        $filter = array( 'and' );
+        foreach ( $words as $word )
+        {
+            // * is the wildcard of the attribute filter and \ its escape; % is escaped by the kernel, _ is not
+            $term = str_replace( array( '\\', '*', '_' ), array( '\\\\', '\\*', '\\_' ), $word['term'] );
+            $filter[] = array( 'name', 'like', '*' . $term . '*' );
+        }
+        $params['AttributeFilter'] = $filter;
         return $params;
+    }
+
+    /**
+     * Whether extendedattributefilter.ini has the group of the search filter (settings of this extension).
+     *
+     * @return bool
+     */
+    protected static function searchFilterAvailable()
+    {
+        return eZINI::instance( 'extendedattributefilter.ini' )->hasGroup( 'explayouts_content_browser_search' );
     }
 
     /**
