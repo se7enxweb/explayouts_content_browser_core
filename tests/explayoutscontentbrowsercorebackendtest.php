@@ -8,8 +8,9 @@
  *
  *  CB-01 - the search filters by name in the fetch itself, so content past the first 1000 nodes by name is found;
  *          offset, limit and the count are those of the filtered result
- *  CB-02 - every word must be in the name; * and \ of the search are literal, not wildcards
+ *  CB-02 - every word must be in the name or name a class (identifier or name, ignoring case)
  *  CB-03 - loadItem() hands out only nodes the current user may read
+ *  CB-04 - the SQL of the filter: LIKE with the wildcards of the search escaped, the class ids as integers
  */
 
 $failures = 0;
@@ -33,26 +34,18 @@ class eZContentObjectTreeNode
     public function attribute( $name ) { return $name === 'name' ? self::$names[$this->id] : null; }
     public static function fetch( $id ) { return isset( self::$names[$id] ) ? new self( $id ) : null; }
 
-    /** the stand-in of the attribute filter: 'and' of name LIKE terms, * the wildcard, \* a literal * */
+    /** the stand-in of the search filter: for each word, the name contains it (no wildcards) or the class is listed */
     protected static function matching( array $params )
     {
         $ids = array_keys( self::$names );
-        sort( $ids );
         usort( $ids, function( $a, $b ) { return strcmp( self::$names[$a], self::$names[$b] ); } );
-        if ( isset( $params['AttributeFilter'] ) )
+        if ( isset( $params['ExtendedAttributeFilter'] ) )
         {
-            $filter = $params['AttributeFilter'];
-            array_shift( $filter );
-            $ids = array_values( array_filter( $ids, function( $id ) use ( $filter ) {
-                foreach ( $filter as $condition )
+            $words = $params['ExtendedAttributeFilter']['params'];
+            $ids = array_values( array_filter( $ids, function( $id ) use ( $words ) {
+                foreach ( $words as $word )
                 {
-                    $pattern = preg_replace_callback( '/\\\\\\\\|\\\\\*|\*|[^*\\\\]+/', function( $m ) {
-                        if ( $m[0] === '*' ) return '.*';
-                        if ( $m[0] === '\\*' ) return '\*';
-                        if ( $m[0] === '\\\\' ) return '\\\\';
-                        return preg_quote( $m[0], '/' );
-                    }, $condition[2] );
-                    if ( $condition[0] !== 'name' || $condition[1] !== 'like' || !preg_match( '/^' . $pattern . '$/i', self::$names[$id] ) )
+                    if ( stripos( self::$names[$id], $word['term'] ) === false && !in_array( self::classOf( $id ), $word['class_ids'], true ) )
                         return false;
                 }
                 return true;
@@ -60,6 +53,8 @@ class eZContentObjectTreeNode
         }
         return $ids;
     }
+
+    public static function classOf( $id ) { return $id === 6904 ? 7 : 1; }
 
     public static function subTreeByNodeID( $params, $nodeId )
     {
@@ -73,6 +68,22 @@ class eZContentObjectTreeNode
         return count( self::matching( $params ) );
     }
 }
+class eZContentClass
+{
+    public $values;
+    public function __construct( array $values ) { $this->values = $values; }
+    public function attribute( $name ) { return $this->values[$name]; }
+    public static function fetchAllClasses( $asObject = true, $includeFilter = true )
+    {
+        return array( new self( array( 'id' => 1, 'identifier' => 'article', 'name' => 'Article' ) ),
+                      new self( array( 'id' => 7, 'identifier' => 'ng_landing_page', 'name' => 'Landing page' ) ) );
+    }
+}
+class eZDB
+{
+    public static function instance() { return new self(); }
+    public function escapeString( $value ) { return addslashes( $value ); }
+}
 class expLayoutsContentBrowserItem
 {
     public $node;
@@ -80,12 +91,14 @@ class expLayoutsContentBrowserItem
 }
 
 require_once dirname( __DIR__ ) . '/classes/explayoutscontentbrowsercorebackend.php';
+require_once dirname( __DIR__ ) . '/classes/explayoutscontentbrowsercoresearchfilter.php';
 
 for ( $i = 1; $i <= 6000; $i++ )
     eZContentObjectTreeNode::$names[$i] = sprintf( 'Article %04d', $i );
 eZContentObjectTreeNode::$names[6901] = 'Layout-Demo';
 eZContentObjectTreeNode::$names[6902] = 'Star *ed';
 eZContentObjectTreeNode::$names[6903] = 'Stared';
+eZContentObjectTreeNode::$names[6904] = 'Spring sale';
 
 $backend = new expLayoutsContentBrowserCoreBackend();
 $ids = function( $items ) { return array_map( function( $item ) { return $item->node->id; }, $items ); };
@@ -93,13 +106,22 @@ $ids = function( $items ) { return array_map( function( $item ) { return $item->
 // CB-01
 cbCheck( $ids( $backend->searchItems( 'Layout', 1 ) ) === array( 6901 ), 'CB-01 a node past the first 1000 by name is found' );
 cbCheck( $backend->searchItemsCount( 'layout', 1 ) === 1, 'CB-01 the count is that of the filtered result (and LIKE ignores case here)' );
-cbCheck( isset( eZContentObjectTreeNode::$lastParams['AttributeFilter'] ) && eZContentObjectTreeNode::$lastParams['Limit'] === 25,
+cbCheck( isset( eZContentObjectTreeNode::$lastParams['ExtendedAttributeFilter'] ) && eZContentObjectTreeNode::$lastParams['Limit'] === 25,
          'CB-01 the filter and the limit are part of the fetch' );
-cbCheck( count( $backend->searchItems( 'Article', 1, 10, 5 ) ) === 5 && $backend->searchItemsCount( 'Article', 1 ) === 6000, 'CB-01 offset and limit of the filtered result' );
+$expected = count( array_filter( eZContentObjectTreeNode::$names, function( $name ) { return strpos( $name, '00' ) !== false; } ) );
+cbCheck( count( $backend->searchItems( '00', 1, 10, 5 ) ) === 5 && $backend->searchItemsCount( '00', 1 ) === $expected, "CB-01 offset and limit of the filtered result ($expected)" );
 
 // CB-02
 cbCheck( $ids( $backend->searchItems( 'Article 0042', 1 ) ) === array( 42 ), 'CB-02 every word must be in the name' );
-cbCheck( $ids( $backend->searchItems( 'Star *ed', 1 ) ) === array( 6902 ), 'CB-02 a * of the search is no wildcard' );
+cbCheck( $ids( $backend->searchItems( 'landing', 1 ) ) === array( 6904 ), 'CB-02 a word of the class name finds content of that class' );
+cbCheck( $ids( $backend->searchItems( 'ng_landing spring', 1 ) ) === array( 6904 ), 'CB-02 class identifier and name together' );
+cbCheck( $backend->searchItemsCount( 'landing autumn', 1 ) === 0, 'CB-02 every word must match' );
+
+// CB-04
+$filter = new expLayoutsContentBrowserCoreSearchFilter();
+$sql = $filter->sqlParts( array( array( 'term' => "50%_o'k!", 'class_ids' => array( '7', 'x' ) ), array( 'term' => 'b', 'class_ids' => array() ) ) );
+cbCheck( $sql['joins'] === "( ezcontentobject_name.name LIKE '%50!%!_o\\'k!!%' ESCAPE '!' OR ezcontentobject.contentclass_id IN (7) ) AND ( ezcontentobject_name.name LIKE '%b%' ESCAPE '!' ) AND ",
+         'CB-04 wildcards escaped, quotes escaped, class ids as integers: ' . $sql['joins'] );
 
 // CB-03
 eZContentObjectTreeNode::$readable = array( 2 );

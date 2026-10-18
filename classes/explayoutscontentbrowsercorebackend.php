@@ -3,6 +3,8 @@ class expLayoutsContentBrowserCoreBackend
 {
     protected $allowedContentTypes;
     protected $locationContentTypes;
+    /** see classes() */
+    protected $classes = null;
 
     public function __construct( array $allowedContentTypes = array(), array $locationContentTypes = array() )
     {
@@ -39,8 +41,9 @@ class expLayoutsContentBrowserCoreBackend
     }
 
     /**
-     * Content below the location (the whole tree for 0) whose name contains every word of $searchText, the user's
-     * read policies applied. The filter is part of the fetch: the first 1000 nodes by name were fetched and then
+     * Content below the location (the whole tree for 0) where every word of $searchText is in the name, the class
+     * identifier or the class name, the user's read policies applied. The filter is part of the fetch (the extended
+     * attribute filter expLayoutsContentBrowserCoreSearchFilter): the first 1000 nodes by name were fetched and then
      * filtered in PHP, so in a tree of more nodes most content could not be found.
      */
     public function searchItems( $searchText, $locationNodeId = 0, $offset = 0, $limit = 25 )
@@ -87,26 +90,62 @@ class expLayoutsContentBrowserCoreBackend
     }
 
     /**
-     * The fetch parameters of a search: every word of $searchText in the name (LIKE, case as the collation has it),
-     * the allowed classes, ten levels deep.
+     * The fetch parameters of a search: each word in the name (LIKE, case as the collation has it) or naming a class
+     * by identifier or name, the allowed classes, ten levels deep.
      */
     protected function searchParams( $searchText )
     {
         $params = array( 'Depth' => 10 );
         $this->applyAllowedContentTypes( $params );
 
-        $filter = array();
+        $words = array();
         foreach ( preg_split( '/\s+/', trim( (string)$searchText ) ) as $term )
         {
-            if ( $term === '' )
-                continue;
-            // * is the wildcard of the attribute filter, \ its escape
-            $filter[] = array( 'name', 'like', '*' . str_replace( array( '\\', '*' ), array( '\\\\', '\\*' ), $term ) . '*' );
+            if ( $term !== '' )
+                $words[] = array( 'term' => $term, 'class_ids' => $this->classIdsMatching( $term ) );
         }
-        if ( $filter )
-            $params['AttributeFilter'] = array_merge( array( 'and' ), $filter );
+        if ( $words )
+            $params['ExtendedAttributeFilter'] = array( 'id' => 'explayouts_content_browser_search', 'params' => $words );
 
         return $params;
+    }
+
+    /**
+     * The ids of the classes whose identifier or name (in the current language) contains $term, ignoring case.
+     *
+     * @param string $term
+     * @return int[]
+     */
+    protected function classIdsMatching( $term )
+    {
+        $ids = array();
+        foreach ( $this->classes() as $id => $texts )
+        {
+            foreach ( $texts as $text )
+            {
+                if ( $text !== '' && mb_stripos( $text, $term ) !== false )
+                {
+                    $ids[] = (int)$id;
+                    break;
+                }
+            }
+        }
+        return $ids;
+    }
+
+    /** class id => array( identifier, name ), read once */
+    protected function classes()
+    {
+        if ( $this->classes === null )
+        {
+            $this->classes = array();
+            foreach ( (array)eZContentClass::fetchAllClasses( true, false ) as $class )
+            {
+                if ( $class instanceof eZContentClass )
+                    $this->classes[(int)$class->attribute( 'id' )] = array( (string)$class->attribute( 'identifier' ), (string)$class->attribute( 'name' ) );
+            }
+        }
+        return $this->classes;
     }
 
     protected function applyAllowedContentTypes( &$params )
@@ -146,29 +185,5 @@ class expLayoutsContentBrowserCoreBackend
             return false;
 
         return in_array( $object->attribute( 'class_identifier' ), $this->allowedContentTypes, true );
-    }
-
-    protected function nodeMatchesSearch( eZContentObjectTreeNode $node, $searchText )
-    {
-        $object = $node->attribute( 'object' );
-        $haystack = strtolower( $node->attribute( 'name' ) );
-        if ( $object instanceof eZContentObject )
-        {
-            $haystack .= ' ' . strtolower( $object->attribute( 'class_identifier' ) );
-            $haystack .= ' ' . strtolower( $object->attribute( 'class_name' ) );
-        }
-
-        $terms = preg_split( '/\s+/', trim( $searchText ) );
-        foreach ( $terms as $term )
-        {
-            $term = trim( $term );
-            if ( $term === '' )
-                continue;
-
-            if ( stripos( $haystack, $term ) === false )
-                return false;
-        }
-
-        return true;
     }
 }
