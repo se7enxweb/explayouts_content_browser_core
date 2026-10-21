@@ -3,6 +3,8 @@ class expLayoutsContentBrowserCoreBackend
 {
     protected $allowedContentTypes;
     protected $locationContentTypes;
+    /** see classes() */
+    protected $classes = null;
 
     public function __construct( array $allowedContentTypes = array(), array $locationContentTypes = array() )
     {
@@ -38,55 +40,137 @@ class expLayoutsContentBrowserCoreBackend
         return (int)eZContentObjectTreeNode::subTreeCountByNodeID( $params, (int)$locationNodeId );
     }
 
+    /**
+     * Content below the location (the whole tree for 0) where every word of $searchText is in the name, the class
+     * identifier or the class name, the user's read policies applied. The filter is part of the fetch (the extended
+     * attribute filter expLayoutsContentBrowserCoreSearchFilter): the first 1000 nodes by name were fetched and then
+     * filtered in PHP, so in a tree of more nodes most content could not be found.
+     */
     public function searchItems( $searchText, $locationNodeId = 0, $offset = 0, $limit = 25 )
     {
-        $searchText = trim( $searchText );
-        $locationNodeId = (int)$locationNodeId;
+        $params = $this->searchParams( $searchText );
+        $params['Limit'] = (int)$limit;
+        $params['Offset'] = (int)$offset;
+        $params['SortBy'] = array( 'name', true );
 
-        $params = array(
-            'Depth' => 10,
-            'Limit' => 1000,
-            'Offset' => 0,
-            'SortBy' => array( 'name', true ),
-        );
-        $this->applyAllowedContentTypes( $params );
-
-        $parentId = $locationNodeId > 0 ? $locationNodeId : eZContentObjectTreeNode::findMainNodeArray( eZContentObject::fetch( eZINI::instance()->variable( 'ContentSettings', 'DefaultSection' ) ) );
-        $nodes = eZContentObjectTreeNode::subTreeByNodeID( $params, $locationNodeId > 0 ? $locationNodeId : 1 );
+        $nodes = eZContentObjectTreeNode::subTreeByNodeID( $params, $this->searchRoot( $locationNodeId ) );
         if ( !is_array( $nodes ) )
             return array();
 
-        $matches = array();
-        foreach ( $nodes as $node )
-        {
-            if ( !$node instanceof eZContentObjectTreeNode )
-                continue;
-
-            if ( $searchText !== '' && !$this->nodeMatchesSearch( $node, $searchText ) )
-                continue;
-
-            $matches[] = $this->buildItem( $node );
-        }
-
-        return array_slice( $matches, (int)$offset, (int)$limit );
+        return $this->buildItems( $nodes );
     }
 
     public function searchItemsCount( $searchText, $locationNodeId = 0 )
     {
-        $items = $this->searchItems( $searchText, $locationNodeId, 0, PHP_INT_MAX );
-        return count( $items );
+        return (int)eZContentObjectTreeNode::subTreeCountByNodeID( $this->searchParams( $searchText ), $this->searchRoot( $locationNodeId ) );
     }
 
+    /**
+     * A node the current user may read and whose class is allowed, or false.
+     */
     public function loadItem( $nodeId )
     {
         $node = eZContentObjectTreeNode::fetch( (int)$nodeId );
         if ( !$node instanceof eZContentObjectTreeNode )
             return false;
 
+        // fetch() asks no policy: without this any node id handed out its name, class and path
+        if ( !$node->canRead() )
+            return false;
+
         if ( !$this->isSelectable( $node ) )
             return false;
 
         return $this->buildItem( $node );
+    }
+
+    protected function searchRoot( $locationNodeId )
+    {
+        return (int)$locationNodeId > 0 ? (int)$locationNodeId : 1;
+    }
+
+    /**
+     * The fetch parameters of a search: each word in the name (LIKE, case as the collation has it) or naming a class
+     * by identifier or name, the allowed classes, ten levels deep.
+     */
+    protected function searchParams( $searchText )
+    {
+        $params = array( 'Depth' => 10 );
+        $this->applyAllowedContentTypes( $params );
+
+        $words = array();
+        foreach ( preg_split( '/\s+/', trim( (string)$searchText ) ) as $term )
+        {
+            if ( $term !== '' )
+                $words[] = array( 'term' => $term, 'class_ids' => $this->classIdsMatching( $term ) );
+        }
+        if ( !$words )
+            return $params;
+
+        // The kernel ignores an extended attribute filter it has no settings for and fetches everything, so the
+        // filter is only used when its settings are there; otherwise the words filter the name alone.
+        if ( self::searchFilterAvailable() )
+        {
+            $params['ExtendedAttributeFilter'] = array( 'id' => 'explayouts_content_browser_search', 'params' => $words );
+            return $params;
+        }
+        $filter = array( 'and' );
+        foreach ( $words as $word )
+        {
+            // * is the wildcard of the attribute filter and \ its escape; % is escaped by the kernel, _ is not
+            $term = str_replace( array( '\\', '*', '_' ), array( '\\\\', '\\*', '\\_' ), $word['term'] );
+            $filter[] = array( 'name', 'like', '*' . $term . '*' );
+        }
+        $params['AttributeFilter'] = $filter;
+        return $params;
+    }
+
+    /**
+     * Whether extendedattributefilter.ini has the group of the search filter (settings of this extension).
+     *
+     * @return bool
+     */
+    protected static function searchFilterAvailable()
+    {
+        return eZINI::instance( 'extendedattributefilter.ini' )->hasGroup( 'explayouts_content_browser_search' );
+    }
+
+    /**
+     * The ids of the classes whose identifier or name (in the current language) contains $term, ignoring case.
+     *
+     * @param string $term
+     * @return int[]
+     */
+    protected function classIdsMatching( $term )
+    {
+        $ids = array();
+        foreach ( $this->classes() as $id => $texts )
+        {
+            foreach ( $texts as $text )
+            {
+                if ( $text !== '' && mb_stripos( $text, $term ) !== false )
+                {
+                    $ids[] = (int)$id;
+                    break;
+                }
+            }
+        }
+        return $ids;
+    }
+
+    /** class id => array( identifier, name ), read once */
+    protected function classes()
+    {
+        if ( $this->classes === null )
+        {
+            $this->classes = array();
+            foreach ( (array)eZContentClass::fetchAllClasses( true, false ) as $class )
+            {
+                if ( $class instanceof eZContentClass )
+                    $this->classes[(int)$class->attribute( 'id' )] = array( (string)$class->attribute( 'identifier' ), (string)$class->attribute( 'name' ) );
+            }
+        }
+        return $this->classes;
     }
 
     protected function applyAllowedContentTypes( &$params )
@@ -126,29 +210,5 @@ class expLayoutsContentBrowserCoreBackend
             return false;
 
         return in_array( $object->attribute( 'class_identifier' ), $this->allowedContentTypes, true );
-    }
-
-    protected function nodeMatchesSearch( eZContentObjectTreeNode $node, $searchText )
-    {
-        $object = $node->attribute( 'object' );
-        $haystack = strtolower( $node->attribute( 'name' ) );
-        if ( $object instanceof eZContentObject )
-        {
-            $haystack .= ' ' . strtolower( $object->attribute( 'class_identifier' ) );
-            $haystack .= ' ' . strtolower( $object->attribute( 'class_name' ) );
-        }
-
-        $terms = preg_split( '/\s+/', trim( $searchText ) );
-        foreach ( $terms as $term )
-        {
-            $term = trim( $term );
-            if ( $term === '' )
-                continue;
-
-            if ( stripos( $haystack, $term ) === false )
-                return false;
-        }
-
-        return true;
     }
 }
