@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.4 (2026-10-20)
 
 - The search is part of the fetch: every word must be in the name, the class identifier or the class name
   (extended attribute filter `explayouts_content_browser_search`; without its settings a filter on the name alone).
