@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.5 (2026-10-29)
+
+- Updated: One copyright notice, Exponential Foundation and 7x.
+
 ## 1.0.4 (2026-10-20)
 
 - The search is part of the fetch: every word must be in the name, the class identifier or the class name
